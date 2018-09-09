@@ -1,6 +1,6 @@
 # A token is a smart contract with a specific interface
 
-from pikciotokens import base
+from pikciotokens import base, context
 
 _TOKEN_VERSION = "T01.1"
 
@@ -30,11 +30,9 @@ allowance = {}
 on his behalf."""
 
 
-def init(context: base.Context, token_initial_supply: float, token_name: str,
-         token_symbol: str):
+def init(token_initial_supply: float, token_name: str, token_symbol: str):
     """Initialises this token
 
-    :param context:
     :param token_initial_supply:
     :param token_name:
     :param token_symbol:
@@ -47,10 +45,9 @@ def init(context: base.Context, token_initial_supply: float, token_name: str,
     symbol = token_symbol
 
 
-def transfer(context: base.Context, to_address: str, amount: int):
+def transfer(to_address: str, amount: int):
     """
 
-    :param context:
     :param to_address:
     :param amount:
     :return:
@@ -58,7 +55,7 @@ def transfer(context: base.Context, to_address: str, amount: int):
     return base.transfer(balance_of, context.sender, to_address, amount)
 
 
-def mint(context: base.Context, to_address: str, amount: int):
+def mint(to_address: str, amount: int):
     """
 
     :param context:
@@ -69,7 +66,7 @@ def mint(context: base.Context, to_address: str, amount: int):
     return base.mint(balance_of, context.sender, to_address, amount)
 
 
-def burn(context: base.Context, to_address: str, amount: int):
+def burn(from_address: str, amount: int):
     """
 
     :param context:
@@ -84,7 +81,7 @@ def approve(context: base.Context, to_address: str, amount: int):
     pass
 
 
-def transfer_from(context: base.Context, to_address: str, amount: int):
+def transfer_from(from_address: str, to_address: str, amount: int):
     """
 
     :param context:
@@ -95,7 +92,7 @@ def transfer_from(context: base.Context, to_address: str, amount: int):
     return base.transfer(balance_of, context.sender, to_address, amount)
 
 
-def burn_from(context: base.Context, to_address: str, amount: int):
+def burn_from(from_address: str, to_address: str, amount: int):
     """
 
     :param context:
