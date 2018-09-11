@@ -1,5 +1,3 @@
-# A token is a smart contract with a specific interface
-
 from pikciotokens import base, context
 
 _TOKEN_VERSION = "T01.1"
@@ -27,77 +25,62 @@ balance_of = {}
 allowance = {}
 # type: dict[str,dict[str,int]]
 """Gives for each customer a map to the amount spenders are allowed to spend 
-on his behalf."""
+on their behalf."""
 
 
-def init(token_initial_supply: float, token_name: str, token_symbol: str):
-    """Initialises this token
-
-    :param token_initial_supply:
-    :param token_name:
-    :param token_symbol:
-    :return:
-    """
+def init(supply: float, _name: str, _symbol: str):
+    """Initialise this token with a new name, symbol and supply."""
     global total_supply, initial_supply, name, symbol
-    total_supply = initial_supply = (token_initial_supply * 10 ** decimals)
+    total_supply = initial_supply = (supply * 10 ** decimals)
     balance_of[context.sender] = total_supply
-    name = token_name
-    symbol = token_symbol
+    name = _name
+    symbol = _symbol
 
 
-def transfer(to_address: str, amount: int):
-    """
-
-    :param to_address:
-    :param amount:
-    :return:
-    """
+def transfer(to_address: str, amount: int) -> bool:
+    """Execute a transfer from the sender to the specified address."""
     return base.transfer(balance_of, context.sender, to_address, amount)
 
 
-def mint(to_address: str, amount: int):
-    """
-
-    :param context:
-    :param to_address:
-    :param amount:
-    :return:
-    """
+def mint(to_address: str, amount: int) -> bool:
+    """Request money creation and add created amount to recipient balance."""
     return base.mint(balance_of, context.sender, to_address, amount)
 
 
-def burn(from_address: str, amount: int):
+def burn(amount: int) -> bool:
+    """Destroy money. Money is withdrawn from sender's account"""
+    return base.burn(balance_of, context.sender, amount)
+
+
+def approve(to_address: str, amount: int) -> bool:
+    """Allow specified address to spend provided amount from sender account.
+
+    The approval is set to specified amount.
     """
+    return base.approve(allowance, context.sender, to_address, amount)
 
-    :param context:
-    :param to_address:
-    :param amount:
-    :return:
+
+def add_approve(to_address: str, delta_amount: int) -> bool:
+    """Allow specified address to spend more or less from sender account.
+
+    The approval is incremented of the specified amount. Negative amounts
+    decrease the approval.
     """
-    return base.burn(balance_of, context.sender, to_address, amount)
+    return base.add_approve(allowance, context.sender, to_address,
+                            delta_amount)
 
 
-def approve(context: base.Context, to_address: str, amount: int):
-    pass
-
-
-def transfer_from(from_address: str, to_address: str, amount: int):
+def transfer_from(from_address: str, to_address: str, amount: int) -> bool:
+    """Require Transfer from another address to specified recipient. Operation
+    is only allowed if sender has sufficient allowance on the source account.
     """
+    return base.transfer_from(balance_of, allowance, context.sender,
+                              from_address, to_address, amount)
 
-    :param context:
-    :param to_address:
-    :param amount:
-    :return:
+
+def burn_from(from_address: str, to_address: str, amount: int) -> bool:
+    """Require Burn from another account. Operation is only allowed if sender
+    has sufficient allowance on the source account.
     """
-    return base.transfer(balance_of, context.sender, to_address, amount)
-
-
-def burn_from(from_address: str, to_address: str, amount: int):
-    """
-
-    :param context:
-    :param to_address:
-    :param amount:
-    :return:
-    """
-    return base.transfer(balance_of, context.sender, to_address, amount)
+    return base.burn_from(balance_of, allowance, context.sender, from_address,
+                          to_address, amount)
