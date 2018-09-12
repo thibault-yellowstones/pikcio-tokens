@@ -3,11 +3,12 @@ from . import events
 MAX_TOKEN_DECIMALS = 8
 
 
-def transfer(balance_of, context, to_address, amount):
-    if balance_of[context.sender] < amount:
+def transfer(balance_of, sender, to_address, amount):
+    if balance_of[sender] < amount:
         raise ValueError("Sender has insufficient funds.")
+    balance_of[sender] -= amount
     balance_of[to_address] += amount
-    events.transfer(context.sender, to_address, amount)
+    events.transfer(sender, to_address, amount)
     return True
 
 
