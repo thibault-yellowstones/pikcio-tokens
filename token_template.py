@@ -28,7 +28,7 @@ allowance = {}
 on their behalf."""
 
 
-def init(supply: float, _name: str, _symbol: str):
+def init(supply: int, _name: str, _symbol: str):
     """Initialise this token with a new name, symbol and supply."""
     global total_supply, initial_supply, name, symbol
     total_supply = initial_supply = (supply * 10 ** decimals)
@@ -42,14 +42,22 @@ def transfer(to_address: str, amount: int) -> bool:
     return base.transfer(balance_of, context.sender, to_address, amount)
 
 
-def mint(to_address: str, amount: int) -> bool:
-    """Request money creation and add created amount to recipient balance."""
-    return base.mint(balance_of, context.sender, to_address, amount)
+def mint(amount: int) -> int:
+    """Request money creation and add created amount to sender balance.
+    Returns new total supply.
+    """
+    global total_supply
+    total_supply = base.mint(balance_of, total_supply, context.sender, amount)
+    return total_supply
 
 
-def burn(amount: int) -> bool:
-    """Destroy money. Money is withdrawn from sender's account"""
-    return base.burn(balance_of, context.sender, amount)
+def burn(amount: int) -> int:
+    """Destroy money. Money is withdrawn from sender's account.
+    Returns new total supply.
+    """
+    global total_supply
+    total_supply = base.burn(balance_of, total_supply, context.sender, amount)
+    return total_supply
 
 
 def approve(to_address: str, amount: int) -> bool:
@@ -60,7 +68,7 @@ def approve(to_address: str, amount: int) -> bool:
     return base.approve(allowance, context.sender, to_address, amount)
 
 
-def add_approve(to_address: str, delta_amount: int) -> bool:
+def add_approve(to_address: str, delta_amount: int) -> int:
     """Allow specified address to spend more or less from sender account.
 
     The approval is incremented of the specified amount. Negative amounts
@@ -78,9 +86,11 @@ def transfer_from(from_address: str, to_address: str, amount: int) -> bool:
                               from_address, to_address, amount)
 
 
-def burn_from(from_address: str, to_address: str, amount: int) -> bool:
+def burn_from(from_address: str, amount: int) -> int:
     """Require Burn from another account. Operation is only allowed if sender
     has sufficient allowance on the source account.
     """
-    return base.burn_from(balance_of, allowance, context.sender, from_address,
-                          to_address, amount)
+    global total_supply
+    total_supply = base.burn_from(balance_of, allowance, total_supply,
+                                  context.sender, from_address, amount)
+    return total_supply
