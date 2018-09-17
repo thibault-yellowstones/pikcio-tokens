@@ -1,180 +1,340 @@
+from functools import partial
+
 from . import events
 
 MAX_TOKEN_DECIMALS = 8
+"""Define the default number of decimals of a token."""
+
+missing_balance_means_zero = True
+"""Indicate if semantically having no balance has the same meaning as having
+an empty balance. Setting this to True allows some optimisations but loses some
+meaning.
+Depending on your need, change this attribute to affect default behavior of 
+Balances and Allowances classes.
+"""
+zero_allowance_allows_transfer = False
+"""Indicate if an allowance of 0 allows transfers of 0. Depends on your
+business needs."""
 
 
 def assert_positive_amount(amount):
-    """Check provided amount is positive. Raise an Exception otherwise.
+    """Check that provided amount is positive. Raise an Exception otherwise.
 
-    :param amount: The amount transferred.
+    :param amount: The amount to check.
     :type amount: int
     """
     if amount < 0:
         raise ValueError("Negative amounts ({}) are forbidden.".format(amount))
 
 
+def delete_entry_if_falsy(dct, key):
+    """Delete entry at key in dict if entry is falsy (0, None, empty).
+
+    :param dct: The dictionary to update.
+    :type dct: dict
+    :param key: The key to look for entry.
+    """
+    if not dct[key]:
+        del dct[key]
+
+
 class Balances(object):
-    """Utility Wrapper for the account balances."""
+    """Provide an object oriented interface to handle balances.
 
-    def __init__(self, balance_of, missing_means_zero=True):
+    The class updates the provided raw dictionary on your behalf.
+    """
+
+    def __init__(self, balance_of, missing_means_zero=None):
+        """Create a new Balances object to wrap provided raw balances.
+
+        :param balance_of: The raw balance, as a dict mapping accounts to
+            amounts.
+        :type balance_of: dict
+        :param missing_means_zero: If True, indicates that an empty balance is
+            equivalent to no balance. Allows optimisations. Default is set to
+            missing_balance_means_zero module attribute.
+        :type missing_means_zero: bool
+        """
         self.balance = balance_of
-        self.missing_means_zero = missing_means_zero
 
-    def _default_balance(self):
-        """Gets the balance of a missing account."""
-        return 0 if self.missing_means_zero else None
+        # Resolve args.
+        if missing_means_zero is None:
+            missing_means_zero = missing_balance_means_zero
 
-    def _post_withdrawal(self, address):
-        if self.missing_means_zero and not self.balance[address]:
-            self.clear(address)
+        # Apply Strategy pattern:
+        if missing_means_zero:
+            # That means that empty accounts are in fact 0
+            self._default_balance = 0
+            # and that we can delete empty account for memory gain.
+            self._post_withdraw = partial(delete_entry_if_falsy, self.balance)
+        else:
+            # Empty account is different than a 0 balance.
+            self._default_balance = None
+            # Never delete empty account.
+            self._post_withdraw = lambda account: None
 
-    def assert_balance(self, address, amount):
-        """Check balance of address against amount.
+    def require(self, account, amount):
+        """Check balance of an account against amount.
 
-        Raise an Exception if balance is insufficient.
-        :param address: Address of the checked account.
-        :type address: str
+        Raise an Exception if balance is too low.
+        :param account: Account to be checked.
+        :type account: str
         :param amount: The amount to check.
         :type amount: int
         """
-        if self.balance.get(address, 0) < amount:
+        # In that case, an empty account or a missing account behave the same.
+        if self.balance.get(account, 0) < amount:
             raise ValueError(
                 "Account {} has insufficient funds ({}<{}).".format(
-                    address, self.balance.get(address, 0), amount
+                    account, self.balance.get(account, 0), amount
                 ))
 
-    def clear(self, address):
-        del self.balance[address]
+    def clear(self, account):
+        """Delete provided account.
 
-    def get(self, address):
-        return self.balance.get(address, self._default_balance())
+        :param account: The account to remove.
+        :type account: str
+        """
+        del self.balance[account]
 
-    def deposit(self, address, amount):
-        """Increase balance of address of specified amount.
+    def get(self, account):
+        """Get the current balance of the provided account.
 
-        A balance entry is created if required.
+        :param account: The account to check.
+        :type account: str
+        :return: The current balance of the account, 0 or None if the account
+            is missing, depending on the configuration.
+        :rtype: int|None
+        """
+        return self.balance.get(account, self._default_balance)
 
-        :param address: Address of the allowed sender.
-        :type address: str
+    def deposit(self, account, amount):
+        """Increase balance of an account of specified amount.
+
+        A balance entry is created if it does not exists.
+
+        :param account: Target account account.
+        :type account: str
         :param amount: The amount to add.
         :type amount: int
-        :return: The new balance of the sender.
+        :return: The new balance of the account.
         :rtype: int
         """
         assert_positive_amount(amount)
-        self.balance[address] = self.balance.get(address, 0) + amount
-        return self.balance[address]
+        self.balance[account] = self.balance.get(account, 0) + amount
+        return self.balance[account]
 
-    def withdraw(self, address, amount):
-        """Decrease balance of address of specified amount.
+    def withdraw(self, account, amount):
+        """Decrease balance of an account of specified amount.
 
-        The amount is removed from the balance and the balance entry is deleted
-        if it falls to 0. No check is performed at this stage, so ensure the
-        balance exists and is high enough.
-
-        :param address: Address of the allowed sender.
-        :type address: str
+        :param account: Address of the account.
+        :type account: str
         :param amount: The amount to remove.
         :type amount: int
         :return: The new balance of the sender.
         :rtype: int
         """
         assert_positive_amount(amount)
-        self.assert_balance(address, amount)
-        self.balance[address] -= amount
-        new_balance = self.balance[address]
-        self._post_withdrawal(address)
+        self.require(account, amount)
+        self.balance[account] -= amount
+        new_balance = self.balance[account]
+        self._post_withdraw(account)
         return new_balance
 
 
 class Allowances(object):
+    """Provide an object oriented interface to handle spending allowances.
 
-    def __init__(self, allowances, missing_means_zero=True,
-                 zero_allows_empty_transfer=False):
+    The class updates the provided raw dictionary on your behalf.
+    """
+
+    def __init__(self, allowances, missing_means_zero=None,
+                 zero_allowance_ok=None):
+        """Create a new Allowances object to wrap provided raw allowances.
+
+        :param allowances: the raw dictionary mapping accounts to all the
+            delegations (account, amount) they allow.
+        :type allowances: dict[str,dict[str,int]]
+        :param missing_means_zero: If True, indicates that an empty allowance
+            is equivalent to no allowance. Allows optimisations. Default is set
+            to missing_balance_means_zero module attribute.
+        :type missing_means_zero: bool
+        :param zero_allowance_ok: If True, indicates that an empty allowance
+            allows transfer of an empty amount. Default is set
+            to zero_allowance_allows_transfer module attribute.
+        :type zero_allowance_ok: bool
+        """
         self.allowances = allowances
-        self.missing_means_zero = missing_means_zero
-        self.zero_allows_empty_transfer = zero_allows_empty_transfer
 
-    def _default_allowance(self):
-        """Gets the balance of a missing account."""
-        return 0 if self.missing_means_zero else None
+        # Resolve args
+        if missing_means_zero is None:
+            missing_means_zero = missing_balance_means_zero
+        if zero_allowance_ok is None:
+            zero_allowance_ok = zero_allowance_allows_transfer
 
-    def _post_decrease(self, account, delegate):
-        if self.missing_means_zero and not self.allowances[account][delegate]:
-            self.clear_one(account, delegate)
-            if not self.allowances[account]:
-                del self.allowances[account]
+        # Apply Strategy pattern:
+        if missing_means_zero:
+            # That means that empty allowances are in fact 0
+            self._default_allowance = 0
+            # and that we can delete empty allowances for memory gain.
+            self._post_decrease = self._post_decrease_remove_entries_if_falsy
+        else:
+            # Empty allowance is different than a 0 allowance.
+            self._default_balance = None
+            # Never delete empty allowance.
+            self._post_decrease = lambda account, delegate: None
+
+        # Also branch authorisation strategy.
+        self._allow_transfer = (
+            self._allow_transfer_zero_allowed if zero_allowance_ok else
+            self._allow_transfer_zero_not_allowed
+        )
+
+    @staticmethod
+    def _allow_transfer_zero_allowed(allowance, amount):
+        """Allow transfers if allowance <= amount."""
+        return allowance is not None and allowance >= amount
+
+    @staticmethod
+    def _allow_transfer_zero_not_allowed(allowance, amount):
+        """Allow transfers if 0 < allowance <= amount."""
+        return allowance and allowance >= amount
+
+    def _post_decrease_remove_entries_if_falsy(self, account, delegate):
+        """Delete empty allowance entries related to account and delegate."""
+        delete_entry_if_falsy(self.allowances[account], delegate)
+        delete_entry_if_falsy(self.allowances, account)
 
     def get_all(self, account):
+        """Get all the allowances of specified account."""
         return self.allowances.get(account, {})
 
-    def get_one(self, address, delegate):
-        return self.get_all(address).get(delegate, self._default_allowance())
+    def get_one(self, account, delegate):
+        """Get the allowance of a delegate on specified account."""
+        return self.get_all(account).get(delegate, self._default_allowance)
 
-    def assert_allowance(self, account, delegate, amount):
-        """Check allowance of sender on behalf of from_address.
+    def require(self, account, delegate, amount):
+        """Check allowance of delegate on behalf of account.
 
-        Raise an Exception if allowance is insufficient.
+        Raise an Exception if allowance is too low.
 
-        :param account: Address of the allowed sender.
+        :param account: Address of the account allowing spending.
         :type account: str
-        :param delegate: Address of the spender account.
+        :param delegate: Address of the account allowed to spend.
         :type delegate: str
         :param amount: The amount to check.
         :type amount: int
         """
-        account_allowance = self.get_one(account, delegate)
-        if any((
-            account_allowance is None,
-            account_allowance == 0 and not self.zero_allows_empty_transfer,
-            account_allowance < amount
-        )):
+        if not self._allow_transfer(self.get_one(account, delegate), amount):
             raise ValueError("{} has not enough approval to spend {} on "
                              "behalf of {}".format(delegate, amount, account))
 
     def decrease(self, account, delegate, amount):
-        """Decrease allowance of sender on behalf of from_address.
+        """Decrease allowance of delegate on behalf of account.
 
-        The amount is removed from the allowance and the allowance entry is deleted
-        if it falls to 0. No check is performed at this stage, so ensure the
-        allowance exists and is high enough.
-
-        :param delegate: Address of the allowed sender.
-        :type delegate: str
-        :param account: Address of the spender account.
+        :param account: Address of the account allowing spending.
         :type account: str
+        :param delegate: Address of the account allowed to spend.
+        :type delegate: str
         :param amount: The amount to remove.
         :type amount: int
+        :return: The new allowance of the delegate on behalf of the account.
+        :rtype: int
         """
         assert_positive_amount(amount)
-        if amount >= self.get_one(account, delegate):
-            self.set(account, delegate, 0)
-        else:
-            self.get_all(account)[delegate] -= amount
+        # Allowance can't go below 0.
+        new_allowance = max(0, self.get_one(account, delegate) - amount)
+        self.set(account, delegate, new_allowance)
         self._post_decrease(account, delegate)
-        return self.get_one(account, delegate) or 0
+        return new_allowance
 
     def increase(self, account, delegate, amount):
+        """Increase allowance of delegate on behalf of account.
+
+        :param account: Address of the account allowing spending.
+        :type account: str
+        :param delegate: Address of the account allowed to spend.
+        :type delegate: str
+        :param amount: The amount to add.
+        :type amount
+        :return: The new allowance of the delegate on behalf of the account.
+        :rtype: int
+        """
         assert_positive_amount(amount)
-        allowances = self.get_all(account)
-        allowances[delegate] = allowances.get(delegate, 0) + amount
-        return allowances[delegate]
+        new_allowance = self.get_one(account, delegate) + amount
+        self.set(account, delegate, new_allowance)
+        return new_allowance
 
     def update(self, account, delegate, amount):
-        if amount >= 0:
-            return self.increase(account, delegate, amount)
-        else:
-            return self.decrease(account, delegate, -amount)
+        """Increase or decrease an allowance, depending on the sign of amount.
+
+        :param account: Address of the account allowing spending.
+        :type account: str
+        :param delegate: Address of the account allowed to spend.
+        :type delegate: str
+        :param amount: The amount to add or remove.
+        :type amount
+        :return: The new allowance of the delegate on behalf of the account.
+        :rtype: int
+        """
+        op = self.increase if amount >= 0 else self.decrease
+        return op(account, delegate, abs(amount))
 
     def set(self, account, delegate, amount):
+        """Define an allowance to a specified amount.
+
+        :param account: Address of the account allowing spending.
+        :type account: str
+        :param delegate: Address of the account allowed to spend.
+        :type delegate: str
+        :param amount: The amount to add or remove.
+        :type amount
+        :return: The new allowance of the delegate on behalf of the account.
+        :rtype: int
+        """
         assert_positive_amount(amount)
         self.get_all(account)[delegate] = amount
 
-    def clear_one(self, address, delegate):
-        del self.allowances[address][delegate]
+    def clear_one(self, account, delegate):
+        """Delete allowance of delegate on account.
 
-    def clear_all(self, address):
-        del self.allowances[address]
+        :param account: Address of the account allowing spending.
+        :type account: str
+        :param delegate: Address of the account allowed to spend.
+        :type delegate: str
+        """
+        del self.allowances[account][delegate]
+
+    def clear_all(self, account):
+        """Delete all allowances of specified account.
+
+        :param account: Address of the account allowing spending.
+        :type account: str
+        """
+        del self.allowances[account]
+
+    def transaction(self, account, delegate, amount):
+        """Creates a Context Manager wrapping the need of an allowance.
+        If no exception is raised inside within the context, the amount will
+        be removed from the delegate allowance.
+
+        Usage:
+        with allowances.transaction(from_address, sender, amount):
+            # do something
+        """
+        this = self
+
+        class _Context(object):
+
+            def __enter__(self):
+                this.require(account, delegate, amount)
+                return self
+
+            def __exit__(self, exc_type, exc_val, exc_tb):
+                if not exc_type:
+                    this.decrease(account, delegate, amount)
+
+        return _Context()
 
 
 def transfer(balance_of, sender, to_address, amount):
@@ -199,8 +359,8 @@ def transfer(balance_of, sender, to_address, amount):
     return True
 
 
-def mint(balance_of, total_supply, sender, amount):
-    """Default mint. Tokens are created and put into sender's account.
+def mint(balance_of, total_supply, account, amount):
+    """Default mint. Tokens are created and put into account.
 
     No other check is performed.
 
@@ -208,20 +368,20 @@ def mint(balance_of, total_supply, sender, amount):
     :type balance_of: dict[str,int]
     :param total_supply: The total supply of tokens before mint operation.
     :type total_supply: int
-    :param sender: Address of the sender who creates and receives the amount.
-    :type sender: str
+    :param account: Address of the sender who creates and receives the amount.
+    :type account: str
     :type amount: int
     :param amount: The amount minted.
     :return: The new total supply.
     :rtype: int
     """
-    new_balance = Balances(balance_of).deposit(sender, amount)
-    events.mint(sender, amount, new_balance, total_supply)
+    new_balance = Balances(balance_of).deposit(account, amount)
+    events.mint(account, amount, new_balance, total_supply)
     return total_supply + amount
 
 
-def burn(balance_of, total_supply, sender, amount):
-    """Default burn. Tokens are destroyed, removed from sender's account.
+def burn(balance_of, total_supply, account, amount):
+    """Default burn. Tokens are destroyed, removed from an account.
 
     Sender must have sufficient funds.
 
@@ -229,74 +389,76 @@ def burn(balance_of, total_supply, sender, amount):
     :type balance_of: dict[str,int]
     :param total_supply: The total supply of tokens before burn operation.
     :type total_supply: int
-    :param sender: Address of the sender who destroys and loses the amount.
-    :type sender: str
+    :param account: Account which destroys and loses the amount.
+    :type account: str
     :param amount: The amount burnt.
     :type amount: int
     :return: The new total supply.
     :rtype: int
     """
-    new_balance = Balances(balance_of).withdraw(sender, amount)
-    events.burn(sender, amount, new_balance, total_supply)
+    new_balance = Balances(balance_of).withdraw(account, amount)
+    events.burn(account, amount, new_balance, total_supply)
     return total_supply - amount
 
 
-def approve(allowance, sender, to_address, amount):
+def approve(allowances, account, delegate, amount):
     """Default approve. The specified address is allowed to spend
     specified amount on behalf of the sender.
 
     If another allowance existed for that address, it is replaced.
 
-    :param allowance: The mapping storing the allowances of each customer.
-    :type allowance: dict[str,dict[str,int]]
-    :param sender: Address of the sender who approves an allowance on his
+    :param allowances: The mapping storing the allowances of each customer.
+    :type allowances: dict[str,dict[str,int]]
+    :param account: Address of the account who approves an allowance on his
         behalf.
-    :type sender: str
-    :param to_address: The address which will be allowed to spend tokens on
-        behalf of the sender.
-    :type to_address: str
+    :type account: str
+    :param delegate: The address which will be allowed to spend tokens on
+        behalf of the account's owner.
+    :type delegate: str
     :param amount: The new allowance.
     :type amount: int
     :return: True if the operation was successful. False otherwise.
     :rtype: bool
     """
-    Allowances(allowance).set(sender, to_address, amount)
+    Allowances(allowances).set(account, delegate, amount)
     return True
 
 
-def add_approve(allowance, sender, to_address, delta_amount):
-    """Default add_approve. The specified address is allowed to spend
+def update_approve(allowances, account, delegate, delta_amount):
+    """Default update_approve. The specified address is allowed to spend
     an additional specified amount on behalf of the sender.
 
     That means existing allowances are preserved.
 
-    :param allowance: The mapping storing the allowances of each customer.
-    :type allowance: dict[str,dict[str,int]]
-    :param sender: Address of the sender who approves an allowance on his
+    :param allowances: The mapping storing the allowances of each customer.
+    :type allowances: dict[str,dict[str,int]]
+
+    :param account: Address of the account who approves an allowance on his
         behalf.
-    :type sender: str
-    :param to_address: The address which will be allowed to spend tokens on
-        behalf of the sender.
-    :type to_address: str
+    :type account: str
+    :param delegate: The address which will be allowed to spend tokens on
+        behalf of the account's owner.
+    :type delegate: str
     :param delta_amount: The top up amount of allowance. It can be negative.
     :type delta_amount: int
     :return: The new allowance of the approved address.
     :rtype: int
     """
-    return Allowances(allowance).update(sender, to_address, delta_amount)
+    return Allowances(allowances).update(account, delegate, delta_amount)
 
 
-def transfer_from(balance_of, allowance, sender, from_address, to_address,
+def transfer_from(balance_of, allowances, delegate, from_address, to_address,
                   amount):
     """Default transfer_from. The amount is taken out of from address instead
-    of sender, provided sender has sufficient allowance on from address.
+    of delegate, provided delegate has sufficient allowance on from address.
 
     :param balance_of: The mapping storing the balances of each customer.
     :type balance_of: dict[str,int]
-    :param allowance: The mapping storing the allowances of each customer.
-    :type allowance: dict[str,dict[str,int]]
-    :param sender: Address of the transfer sender.
-    :type sender: str
+    :param allowances: The mapping storing the allowances of each customer.
+    :type allowances: dict[str,dict[str,int]]
+    :param delegate: Address of the delegate asking for a transfer on behalf of
+        from_address.
+    :type delegate: str
     :param from_address: Address of the transfer sender.
     :type from_address: str
     :param to_address: Address of the transfer recipient.
@@ -306,18 +468,11 @@ def transfer_from(balance_of, allowance, sender, from_address, to_address,
     :return: True if the operation was successful. False otherwise.
     :rtype: bool
     """
-    allowances = Allowances(allowance)
-    allowances.assert_allowance(sender, from_address, amount)
-
-    # Check the transfer operation worked.
-    if not transfer(balance_of, from_address, to_address, amount):
-        return False
-
-    allowances.decrease(sender, from_address, amount)
-    return True
+    with Allowances(allowances).transaction(from_address, delegate, amount):
+        return transfer(balance_of, from_address, to_address, amount)
 
 
-def burn_from(balance_of, allowance, total_supply, sender, from_address,
+def burn_from(balance_of, allowance, total_supply, delegate, from_address,
               amount):
     """Default burn_from. The amount is taken out of from address instead of
     sender, provided sender has sufficient allowance on from address.
@@ -330,8 +485,8 @@ def burn_from(balance_of, allowance, total_supply, sender, from_address,
     :type allowance: dict[str,dict[str,int]]
     :param total_supply: The total supply of tokens before burn operation.
     :type total_supply: int
-    :param sender: Address of the burn invoker.
-    :type sender: str
+    :param delegate: Address of the burn invoker.
+    :type delegate: str
     :param from_address: Address of the account burning tokens.
     :type from_address: str
     :param amount: The amount transferred.
@@ -339,13 +494,5 @@ def burn_from(balance_of, allowance, total_supply, sender, from_address,
     :return: The new total supply.
     :rtype: int
     """
-    allowances = Allowances(allowance)
-    allowances.assert_allowance(sender, from_address, amount)
-
-    new_supply = burn(balance_of, total_supply, from_address, amount)
-    # Check the burn operation worked.
-    if new_supply == total_supply:
-        return new_supply
-
-    allowances.decrease(sender, from_address, amount)
-    return new_supply
+    with Allowances(allowance).transaction(from_address, delegate, amount):
+        return burn(balance_of, total_supply, from_address, amount)

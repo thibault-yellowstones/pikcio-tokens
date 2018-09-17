@@ -68,14 +68,14 @@ def approve(to_address: str, amount: int) -> bool:
     return base.approve(allowance, context.sender, to_address, amount)
 
 
-def add_approve(to_address: str, delta_amount: int) -> int:
+def update_approve(to_address: str, delta_amount: int) -> int:
     """Allow specified address to spend more or less from sender account.
 
     The approval is incremented of the specified amount. Negative amounts
     decrease the approval.
     """
-    return base.add_approve(allowance, context.sender, to_address,
-                            delta_amount)
+    return base.update_approve(allowance, context.sender, to_address,
+                               delta_amount)
 
 
 def transfer_from(from_address: str, to_address: str, amount: int) -> bool:
