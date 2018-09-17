@@ -22,9 +22,9 @@ balance_of = {}
 # type: dict[str,int]
 """Maps customers addresses to their current balance."""
 
-allowance = {}
+allowances = {}
 # type: dict[str,dict[str,int]]
-"""Gives for each customer a map to the amount spenders are allowed to spend 
+"""Gives for each customer a map to the amount delegates are allowed to spend 
 on their behalf."""
 
 
@@ -65,7 +65,7 @@ def approve(to_address: str, amount: int) -> bool:
 
     The approval is set to specified amount.
     """
-    return base.approve(allowance, context.sender, to_address, amount)
+    return base.approve(allowances, context.sender, to_address, amount)
 
 
 def update_approve(to_address: str, delta_amount: int) -> int:
@@ -74,7 +74,7 @@ def update_approve(to_address: str, delta_amount: int) -> int:
     The approval is incremented of the specified amount. Negative amounts
     decrease the approval.
     """
-    return base.update_approve(allowance, context.sender, to_address,
+    return base.update_approve(allowances, context.sender, to_address,
                                delta_amount)
 
 
@@ -82,7 +82,7 @@ def transfer_from(from_address: str, to_address: str, amount: int) -> bool:
     """Require Transfer from another address to specified recipient. Operation
     is only allowed if sender has sufficient allowance on the source account.
     """
-    return base.transfer_from(balance_of, allowance, context.sender,
+    return base.transfer_from(balance_of, allowances, context.sender,
                               from_address, to_address, amount)
 
 
@@ -91,6 +91,6 @@ def burn_from(from_address: str, amount: int) -> int:
     has sufficient allowance on the source account.
     """
     global total_supply
-    total_supply = base.burn_from(balance_of, allowance, total_supply,
+    total_supply = base.burn_from(balance_of, allowances, total_supply,
                                   context.sender, from_address, amount)
     return total_supply
