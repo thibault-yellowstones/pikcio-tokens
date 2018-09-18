@@ -1,39 +1,27 @@
-import logging
-import types
+import json
+from datetime import datetime
 
-__EVENTS_MIN_LEVEL = 100
-
-__next_level = __EVENTS_MIN_LEVEL
-
-
-def init():
-    logging.basicConfig(
-        format='{"datestamp": "%(asctime)s", "event": "%(levelname)s", "args": "%(message)s"}',
-        level=__EVENTS_MIN_LEVEL
-    )
+EVENT_FMT = '{{"ts": "{asctime}", "event": "{event}", {msg}}}'
 
 
 def register(event_name, *args):
-    def event():
-        logging.log(event_name, '')
-    event_code = types.CodeType(args,
-                                event.func_code.co_nlocals,
-                                event.func_code.co_stacksize,
-                                event.func_code.co_flags,
-                                event.func_code.co_code,
-                                event.func_code.co_consts,
-                                event.func_code.co_names,
-                                event.func_code.co_varnames,
-                                event.func_code.co_filename,
-                                event_name,
-                                event.func_code.co_firstlineno,
-                                event.func_code.co_lnotab)
+    args = set(args)
 
-    return types.FunctionType(event_code, event.func_globals, event_name)
+    def _event(**kwargs):
+        if set(kwargs.keys()) != args:
+            raise ValueError(
+                'Event args ({}) do not match event definition ({}) of '
+                'event {}'.format(
+                    ', '.join(sorted(kwargs.keys())),
+                    ', '.join(sorted(args)),
+                    event_name
+                )
+            )
+        print(EVENT_FMT.format(
+            asctime=datetime.utcnow().isoformat(),
+            event=event_name,
+            msg=json.dumps(kwargs).lstrip('{').rstrip('}')
+        ))
 
-    logging.addLevelName(__next_level, event_name)
-    globals().update(event_name, )
-
-
-def transfer(from_address, to_address, amount):
-    logging.log("event")
+    globals().update({event_name: _event})
+    return _event
