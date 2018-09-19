@@ -1,4 +1,4 @@
-from pikciotokens import base, context
+from pikciotokens import base, context, events
 
 _TOKEN_VERSION = "T01.1"
 
@@ -19,13 +19,18 @@ total_supply = 0
 or burnt."""
 
 balance_of = {}
-# type: dict[str,int]
+# type: dict
 """Maps customers addresses to their current balance."""
 
 allowances = {}
-# type: dict[str,dict[str,int]]
+# type: dict
 """Gives for each customer a map to the amount delegates are allowed to spend 
 on their behalf."""
+
+
+transferred = events.register("transfer", "sender", "recipient", "amount")
+burnt = events.register("burn", "sender", "amount", "new_supply")
+minted = events.register("mint", "sender", "amount", "new_supply")
 
 
 def init(supply: int, _name: str, _symbol: str):
@@ -39,7 +44,11 @@ def init(supply: int, _name: str, _symbol: str):
 
 def transfer(to_address: str, amount: int) -> bool:
     """Execute a transfer from the sender to the specified address."""
-    return base.transfer(balance_of, context.sender, to_address, amount)
+    sender = context.sender
+    if base.transfer(balance_of, sender, to_address, amount):
+        transferred(sender=sender, recipient=total_supply, amount=amount)
+        return True
+    return False
 
 
 def mint(amount: int) -> int:
@@ -47,7 +56,12 @@ def mint(amount: int) -> int:
     Returns new total supply.
     """
     global total_supply
-    total_supply = base.mint(balance_of, total_supply, context.sender, amount)
+
+    new_supply = base.mint(balance_of, total_supply, context.sender, amount)
+    if new_supply != total_supply:
+        minted(sender=context.sender, amount=amount, new_supply=new_supply)
+
+    total_supply = new_supply
     return total_supply
 
 
@@ -56,7 +70,12 @@ def burn(amount: int) -> int:
     Returns new total supply.
     """
     global total_supply
-    total_supply = base.burn(balance_of, total_supply, context.sender, amount)
+
+    new_supply = base.burn(balance_of, total_supply, context.sender, amount)
+    if new_supply != total_supply:
+        burnt(sender=context.sender, amount=amount, new_supply=new_supply)
+
+    total_supply = new_supply
     return total_supply
 
 
@@ -82,8 +101,12 @@ def transfer_from(from_address: str, to_address: str, amount: int) -> bool:
     """Require Transfer from another address to specified recipient. Operation
     is only allowed if sender has sufficient allowance on the source account.
     """
-    return base.transfer_from(balance_of, allowances, context.sender,
-                              from_address, to_address, amount)
+    if base.transfer_from(balance_of, allowances, context.sender, from_address,
+                          to_address, amount):
+        transferred(sender=from_address, recipient=total_supply, amount=amount)
+        return True
+
+    return False
 
 
 def burn_from(from_address: str, amount: int) -> int:
@@ -91,6 +114,10 @@ def burn_from(from_address: str, amount: int) -> int:
     has sufficient allowance on the source account.
     """
     global total_supply
-    total_supply = base.burn_from(balance_of, allowances, total_supply,
-                                  context.sender, from_address, amount)
+    new_supply = base.burn_from(balance_of, allowances, total_supply,
+                                context.sender, from_address, amount)
+    if new_supply != total_supply:
+        burnt(sender=context.sender, amount=amount, new_supply=new_supply)
+
+    total_supply = new_supply
     return total_supply

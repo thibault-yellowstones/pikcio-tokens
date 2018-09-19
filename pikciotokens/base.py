@@ -1,7 +1,5 @@
 from functools import partial
 
-from . import events
-
 MAX_TOKEN_DECIMALS = 8
 """Define the default number of decimals of a token."""
 
@@ -355,7 +353,6 @@ def transfer(balance_of, sender, to_address, amount):
     balances = Balances(balance_of)
     balances.withdraw(sender, amount)
     balances.deposit(to_address, amount)
-    events.transfer(sender, to_address, amount)
     return True
 
 
@@ -375,8 +372,7 @@ def mint(balance_of, total_supply, account, amount):
     :return: The new total supply.
     :rtype: int
     """
-    new_balance = Balances(balance_of).deposit(account, amount)
-    events.mint(account, amount, new_balance, total_supply)
+    Balances(balance_of).deposit(account, amount)
     return total_supply + amount
 
 
@@ -396,8 +392,7 @@ def burn(balance_of, total_supply, account, amount):
     :return: The new total supply.
     :rtype: int
     """
-    new_balance = Balances(balance_of).withdraw(account, amount)
-    events.burn(account, amount, new_balance, total_supply)
+    Balances(balance_of).withdraw(account, amount)
     return total_supply - amount
 
 
