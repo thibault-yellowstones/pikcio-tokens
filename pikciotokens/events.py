@@ -1,10 +1,14 @@
 import json
-from datetime import datetime
+import logging
+
+LOG_MIN_LEVEL = 100
+LOGGER_NAME = 'pikcio-events'
 
 _registered_events = set()
 """Names of all registered events. Pretty but unreliable."""
 _registered_events_ids = set()
 """Ids of all registered events. Reliable."""
+_log_level_index = LOG_MIN_LEVEL
 
 
 def registered_events():
@@ -22,11 +26,13 @@ def registered_events():
 def is_registered(event):
     """Indicates if provided event is currently registered.
 
-    :param: The event to check.
-    :type: callable
+    :param: The event to check or its name.
+    :type: callable|str
     :return: True if the event exists. False otherwise.
     :rtype: bool
     """
+    if isinstance(event, str):
+        event = globals().get(event, None)
     return id(event) in _registered_events_ids
 
 
@@ -41,6 +47,9 @@ def register(event_name, *args):
         events.register("transfer", "sender", "recipient", "amount")
         events.transfer(sender="a", recipient="b", amount:18.3)
 
+    Events are dispatched using the standard logging module. To subscribe to an
+    an event notification, add an appropriate handler to the events logger.
+
     :param event_name: The name of the event to create. If it exists already,
         it will be replaced.
     :type event_name: str
@@ -48,8 +57,12 @@ def register(event_name, *args):
     :return: The created event.
     :rtype: callable
     """
+    global _log_level_index
+
     args = set(args)
     event_id = []  # Use an array to capture event id in closure.
+    level = _log_level_index
+    logger = logging.getLogger(LOGGER_NAME)
 
     def _event(**kwargs):
         # event has to be still registered
@@ -62,25 +75,27 @@ def register(event_name, *args):
         if set(kwargs.keys()) != args:
             raise ValueError(
                 'Event args ({}) do not match event definition ({}) of '
-                'event {}'.format(
+                '{} test'.format(
                     ', '.join(sorted(kwargs.keys())),
                     ', '.join(sorted(args)),
                     event_name
                 )
             )
-        # Print some JSON out. It will be captured by the executing context.
-        print('{{"ts": "{asctime}", "event": "{event}", {msg}}}'.format(
-            asctime=datetime.utcnow().isoformat(),
-            event=event_name,
-            msg=json.dumps(kwargs)
-        ))
+        # This log can be caught be any handler to process it.
+        logger.log(level, msg=json.dumps(kwargs).strip('{}'))
+
+    # Now that event is defined, fetch its unique id.
+    event_id.append(id(_event))
 
     # If an event with same name exists already, unregister it.
     if event_name in _registered_events:
         unregister(event_name)
 
+    # Bind event name to a log level.
+    logging.addLevelName(level, event_name)
+    _log_level_index += 1
+
     # Add the event to this module root and update registers.
-    event_id[0] = id(_event)
     globals().update({event_name: _event})
     _registered_events.add(event_name)
     _registered_events_ids.add(event_id[0])
