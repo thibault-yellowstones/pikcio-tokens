@@ -1,6 +1,6 @@
 from pikciotokens import base, context, events
 
-_TOKEN_VERSION = "T01.1"
+_TOKEN_VERSION = "T1.0"
 
 name = ''
 """The friendly name of the token"""
